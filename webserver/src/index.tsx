@@ -1,10 +1,9 @@
-import { Elysia } from 'elysia'
+import { Elysia, t } from 'elysia'
 import { html } from '@elysiajs/html'
 import { swagger } from '@elysiajs/swagger'
 
 const messages: string[] = []
-const send_queues: string[][] = []
-let user_id = 0
+const users = new Map();
 
 new Elysia()
     .use(html())
@@ -18,9 +17,9 @@ new Elysia()
                 <script src="https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"></script>
             </head>
             <body>
-                <h1>Hello World</h1>
+                <h1>Message others</h1>
 
-                <div hx-ext="ws" ws-connect="/ws">
+                <div hx-ext="ws" ws-connect="/message-stream">
                     <div id="messages"></div>
 
                     <form id="write-message" ws-send>
@@ -30,17 +29,21 @@ new Elysia()
             </body>
         </html>
     )
-    .ws('/ws', {
-        async open(ws) {
-            const ws_id = user_id++
-            send_queues[ws_id] = [...messages]
+    .ws('/message-stream', {
+        open(ws) {
+            users.set(ws.id, {
+                toSend: [...messages], 
+                updater: null
+            })
 
-            setInterval(
+            const user = users.get(ws.id)
+
+            user.updater = setInterval(
                 async () => {
                     ws.send(
                         <div id="messages" hx-swap-oob="beforeend">
                             {
-                                send_queues[ws_id].map(message => 
+                                users.get(ws.id).toSend.map((message: string) => 
                                     <p safe>
                                         {message}
                                     </p>
@@ -49,9 +52,9 @@ new Elysia()
                         </div>
                     )
 
-                    send_queues[ws_id] = []
+                    user.toSend = []
                 }, 
-                200
+                500
             )
         },
 
@@ -59,7 +62,11 @@ new Elysia()
             const msg = (message as any).message
 
             messages.push(msg)
-            send_queues.forEach(queue => queue.push(msg))
+            users.forEach(user => user.toSend.push(msg))
+        },
+
+        close(ws) {
+            clearInterval(users.get(ws.id).updater)
         }
     })
     .listen(3000)
