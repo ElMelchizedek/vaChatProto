@@ -1,13 +1,15 @@
 import { Elysia, t } from 'elysia'
 import { html } from '@elysiajs/html'
-import { swagger } from '@elysiajs/swagger'
 
+// message history
 const messages: string[] = []
-const users = new Map();
+
+// maps WebSocket connection IDs to functions that will send messages to those WebSocket connections
+const connections = new Map<string, (content: string | string[]) => void>()
 
 new Elysia()
     .use(html())
-    .use(swagger())
+
     .get('/', () =>
         <html lang='en'>
             <head>
@@ -16,57 +18,55 @@ new Elysia()
                 <script src="https://unpkg.com/htmx.org@2.0.0"></script>
                 <script src="https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"></script>
             </head>
-            <body>
+            
+            <body  hx-ext="ws" ws-connect="/ws-main">
                 <h1>Message others</h1>
 
-                <div hx-ext="ws" ws-connect="/message-stream">
-                    <div id="messages"></div>
+                <div id="messages"></div>
 
-                    <form id="write-message" ws-send>
-                        <input name="message" />
-                    </form>
-                </div>
+                <form id="write-message" ws-send>
+                    <input name="message" />
+                </form>
             </body>
         </html>
     )
-    .ws('/message-stream', {
+
+    .ws('/ws-main', {
+        // runs whenever a new WebSocket connection is opened
         open(ws) {
-            users.set(ws.id, {
-                toSend: [...messages], 
-                updater: null
-            })
-
-            const user = users.get(ws.id)
-
-            user.updater = setInterval(
-                async () => {
-                    ws.send(
-                        <div id="messages" hx-swap-oob="beforeend">
-                            {
-                                users.get(ws.id).toSend.map((message: string) => 
-                                    <p safe>
-                                        {message}
-                                    </p>
-                                )
-                            }
-                        </div>
-                    )
-
-                    user.toSend = []
-                }, 
-                500
+            // setup message sender for this WebSocket connection
+            connections.set(ws.id, 
+                content => ws.send(
+                    <div id="messages" hx-swap-oob="beforeend">
+                        {
+                            typeof content === 'string'
+                                ? <p safe>{content}</p>
+                                : content.map(msg => <p safe>{msg}</p>)
+                        }
+                    </div>
+                )
             )
+
+            // send message history to new client
+            connections.get(ws.id)!(messages)
         },
 
+        // runs every time a message is sent over a WebSocket connection
         message(ws, message) {
             const msg = (message as any).message
 
+            // push new message to message history
             messages.push(msg)
-            users.forEach(user => user.toSend.push(msg))
+
+            // send the message to every client
+            connections.forEach(send => send(msg))
         },
 
+        // runs whenever a WebSocket connection is closed
         close(ws) {
-            clearInterval(users.get(ws.id).updater)
+            // delete connection entry for the closed WebSocket
+            connections.delete(ws.id)
         }
     })
+
     .listen(3000)
