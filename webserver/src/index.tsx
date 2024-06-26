@@ -1,25 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { html } from '@elysiajs/html'
-
-class Client {
-    constructor(ws_send: (content: string) => void) {
-        this.send = ws_send;
-    }
-
-    public async sendMessage(content: string | string[]) {
-        this.send(await
-            <div id="messages" hx-swap-oob="beforeend">
-                {
-                    typeof content === 'string'
-                        ? <p safe>{content}</p>
-                        : content.map(msg => <p safe>{msg}</p>)
-                }
-            </div>
-        )
-    }
-
-    private send: (content: string) => void;
-}
+import { Client, Message } from './client'
 
 // channels' message histories and listeners
 const channels = new Map<string, {listeners: string[], history: string[]}>()
@@ -28,6 +9,14 @@ channels.set("other", {listeners: [], history: []})
 
 // maps session IDs to Client handlers
 const sessions = new Map<string, Client>()
+
+// user signs in
+// user lands on their homepage
+//   user info is grabbed during, including notifications inbox
+//   user's available channels are grabbed
+// homepage shows links that will take user to a channel they have access to
+//   grab paginated history of messages for that channel
+//   subscrieb
 
 new Elysia()
     .use(html())
@@ -38,7 +27,7 @@ new Elysia()
             sessionId = Math.random().toString(36).substring(2)
         } while(sessions.has(sessionId))
 
-        set.headers['Set-Cookie'] = `session=${sessionId}`
+        set.headers['Set-Cookie'] = `session=${sessionId}; SameSite=Strict`
 
         return (
             <html lang='en'>
@@ -79,7 +68,11 @@ new Elysia()
 
             return (
                 <div id="messages">
-                    {channels.get(query.channel)!.history.map(msg => <p safe>{msg}</p>)}
+                    {
+                        channels.get(query.channel)!.history.map(
+                            msg => <Message>{msg}</Message>
+                        )
+                    }
                 </div>
             )
         },
@@ -127,6 +120,10 @@ new Elysia()
                 channel.listeners = channel.listeners.filter(listener => listener !== ws.data.cookie.session.value)
             })
         }
+    })
+
+    .post('/sns', m => {
+        console.log(JSON.stringify(m))
     })
 
     .listen(3000)
