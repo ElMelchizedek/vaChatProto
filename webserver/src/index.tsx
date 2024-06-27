@@ -2,6 +2,8 @@ import { Elysia, t } from 'elysia'
 import { html } from '@elysiajs/html'
 import { Client, Message } from './client'
 
+import { SNS } from "@aws-sdk/client-sns-node"
+
 // channels' message histories and listeners
 const channels = new Map<string, {listeners: string[], history: string[]}>()
 channels.set("main", {listeners: [], history: []})
@@ -9,6 +11,8 @@ channels.set("other", {listeners: [], history: []})
 
 // maps session IDs to Client handlers
 const sessions = new Map<string, Client>()
+
+const sns = new SNS({ region: "ap-southeast-2" })
 
 // user signs in
 // user lands on their homepage
@@ -122,8 +126,48 @@ new Elysia()
         }
     })
 
-    .post('/sns', m => {
-        console.log(JSON.stringify(m))
-    })
+    .post('/sns', 
+        async ({ body, headers }) => {
+            const messageType = headers["x-amz-sns-message-type"]
+
+            switch(messageType) {
+                case "SubscriptionConfirmation":
+                    const item = JSON.parse(body) as {
+                        Type: string,
+                        Token: string,
+                        TopicArn: string,
+                        Message: string,
+                        SubscribeUrl: string,
+                        Timestamp: string,
+                        SignatureVersion: string,
+                        Signature: string,
+                        SigningCertURL: string,
+                    }
+        
+                    await sns.confirmSubscription({
+                        Token: item.Token!,
+                        TopicArn: item.TopicArn!
+                    })
+
+                    console.log("Subscription confirmed")
+                    break
+
+                default:
+                    console.log("Unknown message type")
+            }
+        }, 
+        {
+            body: t.String(),
+            headers: t.Object({
+                "x-amz-sns-message-type": t.String()
+            })
+        }
+    )
 
     .listen(3000)
+
+await sns.subscribe({
+    Protocol: "http",
+    TopicArn: "arn:aws:sns:ap-southeast-2:471112758277:channelTopicalpha",
+    Endpoint: "http://3.104.219.246:3000/sns"
+})
